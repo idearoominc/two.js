@@ -12,6 +12,7 @@
     getRatio = Two.Utils.getRatio,
     getComputedMatrix = Two.Utils.getComputedMatrix,
     toFixed = Two.Utils.toFixed,
+    CanvasUtils = Two[Two.Types.canvas].Utils,
     _ = Two.Utils;
 
   var webgl = {
@@ -226,6 +227,23 @@
 
             case Two.Commands.close:
               ctx.closePath();
+              break;
+
+            case Two.Commands.arc:
+
+              var rx = b.rx;
+              var ry = b.ry;
+              var xAxisRotation = b.xAxisRotation;
+              var largeArcFlag = b.largeArcFlag;
+              var sweepFlag = b.sweepFlag;
+
+              prev = closed ? mod(i - 1, length) : max(i - 1, 0);
+              a = commands[prev];
+
+              var ax = toFixed(a.x);
+              var ay = toFixed(a.y);
+
+              CanvasUtils.renderSvgArcCommand(ctx, ax, ay, rx, ry, largeArcFlag, sweepFlag, xAxisRotation, x, y);
               break;
 
             case Two.Commands.curve:
@@ -662,12 +680,12 @@
         ctx.textBaseline = elem._baseline;
 
         // TODO: Estimate this better
-        var width = ctx.measureText(elem._value).width;
-        var height = Math.max(elem._size || elem._leading);
+        var width = ctx.measureText(elem._value).width * 1.25;
+        var height = Math.max(elem._size, elem._leading) * 1.25;
 
         if (this._linewidth && !webgl.isHidden.test(this._stroke)) {
-          // width += this._linewidth; // TODO: Not sure if the `measure` calcs this.
-          height += this._linewidth;
+          width += this._linewidth * 2;
+          height += this._linewidth * 2;
         }
 
         var w = width / 2;
@@ -1127,6 +1145,11 @@
     var params, gl, vs, fs;
     this.domElement = options.domElement || document.createElement('canvas');
 
+    if (!_.isUndefined(options.offscreenElement)) {
+      webgl.canvas = options.offscreenElement;
+      webgl.ctx = webgl.canvas.getContext('2d');
+    }
+
     // Everything drawn on the canvas needs to come from the stage.
     this.scene = new Two.Group();
     this.scene.parent = this;
@@ -1210,10 +1233,12 @@
       this.domElement.width = width * this.ratio;
       this.domElement.height = height * this.ratio;
 
-      _.extend(this.domElement.style, {
-        width: width + 'px',
-        height: height + 'px'
-      });
+      if (_.isObject(this.domElement.style)) {
+        _.extend(this.domElement.style, {
+          width: width + 'px',
+          height: height + 'px'
+        });
+      }
 
       width *= this.ratio;
       height *= this.ratio;
@@ -1250,4 +1275,4 @@
 
   });
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);

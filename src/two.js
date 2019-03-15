@@ -1,6 +1,16 @@
-(this || window).Two = (function(previousTwo) {
+(this || self || window).Two = (function(previousTwo) {
 
-  var root = typeof window != 'undefined' ? window : typeof global != 'undefined' ? global : null;
+  var root;
+  if (typeof window !== 'undefined') {
+    root = window;
+  } else if (typeof global !== 'undefined') {
+    root = global;
+  } else if (typeof self !== 'undefined') {
+    root = self
+  } else {
+    root = this;
+  }
+
   var toString = Object.prototype.toString;
   /**
    * @name _
@@ -219,6 +229,7 @@
 
   var sin = Math.sin,
     cos = Math.cos,
+    acos = Math.acos,
     atan2 = Math.atan2,
     sqrt = Math.sqrt,
     round = Math.round,
@@ -429,7 +440,13 @@
      * @name Two.Version
      * @property {String} - The current working version of the library.
      */
-    Version: 'v0.7.0',
+    Version: 'v0.7.0-beta.4',
+
+    /**
+     * @name Two.PublishDate
+     * @property {String} - The automatically generated publish date in the build process to verify version release candidates.
+     */
+    PublishDate: '<%= publishDate %>',
 
     /**
      * @name Two.Identifier
@@ -462,6 +479,7 @@
       move: 'M',
       line: 'L',
       curve: 'C',
+      arc: 'A',
       close: 'Z'
     },
 
@@ -546,14 +564,16 @@
       /**
        * @name Two.Utils.shim
        * @function
-       * @param {Canvas} CanvasModule - The `Canvas` object provided by `node-canvas`.
-       * @returns {Canvas} Returns an instanced canvas object from the provided `node-canvas` `Canvas` object.
+       * @param {canvas} canvas - The instanced `Canvas` object provided by `node-canvas`.
+       * @param {Image} [Image] - The prototypical `Image` object provided by `node-canvas`. This is only necessary to pass if you're going to load bitmap imagery.
+       * @returns {canvas} Returns the instanced canvas object you passed from with additional attributes needed for Two.js.
        * @description Convenience method for defining all the dependencies from the npm package `node-canvas`. See [node-canvas]{@link https://github.com/Automattic/node-canvas} for additional information on setting up HTML5 `<canvas />` drawing in a node.js environment.
        */
-      shim: function(CanvasModule) {
-        var canvas = new CanvasModule();
+      shim: function(canvas, Image) {
         Two.CanvasRenderer.Utils.shim(canvas);
-        Two.Utils.Image = CanvasModule.Image;
+        if (!_.isUndefined(Image)) {
+          Two.Utils.Image = Image;
+        }
         Two.Utils.isHeadless = true;
         return canvas;
       },
@@ -635,7 +655,7 @@
         Tolerance: {
           distance: 0.25,
           angle: 0,
-          epsilon: 0.01
+          epsilon: Number.EPSILON
         },
 
         // Lookup tables for abscissas and weights with values for n = 2 .. 16.
@@ -837,13 +857,43 @@
       getSvgStyles: function(node) {
 
         var styles = {};
+        var attributes = Two.Utils.getSvgAttributes(node);
+        var length = Math.max(attributes.length, node.style.length);
 
-        for (var i = 0; i < node.style.length; i++) {
+        for (var i = 0; i < length; i++) {
+
           var command = node.style[i];
-          styles[command] = node.style[command];
+          var attribute = attributes[i];
+
+          if (command) {
+            styles[command] = node.style[command];
+          }
+          if (attribute) {
+            styles[attribute] = node.getAttribute(attribute);
+          }
+
         }
 
         return styles;
+
+      },
+
+      getSvgAttributes: function(node) {
+
+        var attributes = node.getAttributeNames();
+
+        // Reserved attributes to remove
+        var keywords = ['id', 'class', 'transform', 'xmlns', 'viewBox'];
+
+        for (var i = 0; i < keywords.length; i++) {
+          var keyword = keywords[i];
+          var index = _.indexOf(attributes, keyword);
+          if (index >= 0) {
+            attributes.splice(index, 1);
+          }
+        }
+
+        return attributes;
 
       },
 
@@ -1105,6 +1155,9 @@
 
           _.each(commands.slice(0), function(command, i) {
 
+            var number, fid, lid, numbers, first, s;
+            var j, k, ct, l, times;
+
             var type = command[0];
             var lower = type.toLowerCase();
             var items = command.slice(1).trim().split(/[\s,]+|(?=\s?[+\-])/);
@@ -1113,19 +1166,21 @@
 
             // Handle double decimal values e.g: 48.6037.71.8
             // Like: https://m.abcsofchinese.com/images/svg/亼ji2.svg
-            for (var j = 0; j < items.length; j++) {
+            for (j = 0; j < items.length; j++) {
 
-              var number = items[j];
+              number = items[j];
+              fid = number.indexOf('.');
+              lid = number.lastIndexOf('.');
 
-              if (number.indexOf( '.' ) !== number.lastIndexOf( '.' )) {
+              if (fid !== lid) {
 
-                var numbers = number.split('.');
-                var first = numbers[0] + '.' + numbers[1];
+                numbers = number.split('.');
+                first = numbers[0] + '.' + numbers[1];
 
-                items.splice(i, 1, first);
+                items.splice(j, 1, first);
 
-                for (var s = 2; s < numbers.length; s++) {
-                  items.splice(i + s - 1, 0, '0.' + numbers[s]);
+                for (s = 2; s < numbers.length; s++) {
+                  items.splice(j + s - 1, 0, '0.' + numbers[s]);
                 }
 
                 hasDoubleDecimals = true;
@@ -1174,11 +1229,12 @@
                 break;
             }
 
+            // This means we have a polybezier.
             if (bin) {
 
-              for (var j = 0, l = items.length, times = 0; j < l; j+=bin) {
+              for (j = 0, l = items.length, times = 0; j < l; j+=bin) {
 
-                var ct = type;
+                ct = type;
                 if (times > 0) {
 
                   switch (type) {
@@ -1192,7 +1248,7 @@
 
                 }
 
-                result.push([ct].concat(items.slice(j, j + bin)).join(' '));
+                result.push(ct + items.slice(j, j + bin).join(' '));
                 times++;
 
               }
@@ -1430,7 +1486,7 @@
 
                 var rx = parseFloat(coords[0]);
                 var ry = parseFloat(coords[1]);
-                var xAxisRotation = parseFloat(coords[2]) * PI / 180;
+                var xAxisRotation = parseFloat(coords[2]);// * PI / 180;
                 var largeArcFlag = parseFloat(coords[3]);
                 var sweepFlag = parseFloat(coords[4]);
 
@@ -1442,117 +1498,18 @@
                   y4 += y1;
                 }
 
-                // http://www.w3.org/TR/SVG/implnote.html#ArcConversionEndpointToCenter
+                var anchor = new Two.Anchor(x4, y4);
+                anchor.command = Two.Commands.arc;
+                anchor.rx = rx;
+                anchor.ry = ry;
+                anchor.xAxisRotation = xAxisRotation;
+                anchor.largeArcFlag = largeArcFlag;
+                anchor.sweepFlag = sweepFlag;
 
-                // Calculate midpoint mx my
-                var mx = (x4 - x1) / 2;
-                var my = (y4 - y1) / 2;
+                result = anchor;
 
-                // Calculate x1' y1' F.6.5.1
-                var _x = mx * cos(xAxisRotation) + my * sin(xAxisRotation);
-                var _y = - mx * sin(xAxisRotation) + my * cos(xAxisRotation);
-
-                var rx2 = rx * rx;
-                var ry2 = ry * ry;
-                var _x2 = _x * _x;
-                var _y2 = _y * _y;
-
-                // adjust radii
-                var l = _x2 / rx2 + _y2 / ry2;
-                if (l > 1) {
-                  rx *= sqrt(l);
-                  ry *= sqrt(l);
-                }
-
-                var amp = sqrt(
-                  (rx2 * ry2 - rx2 * _y2 - ry2 * _x2) / (rx2 * _y2 + ry2 * _x2));
-
-                if (_.isNaN(amp)) {
-                  amp = 0;
-                } else if (largeArcFlag != sweepFlag && amp > 0) {
-                  amp *= -1;
-                }
-
-                // Calculate cx' cy' F.6.5.2
-                var _cx = amp * rx * _y / ry;
-                var _cy = - amp * ry * _x / rx;
-
-                // Calculate cx cy F.6.5.3
-                var cx = _cx * cos(xAxisRotation) - _cy * sin(xAxisRotation)
-                  + (x1 + x4) / 2;
-                var cy = _cx * sin(xAxisRotation) + _cy * cos(xAxisRotation)
-                  + (y1 + y4) / 2;
-
-                // vector magnitude
-                var m = function(v) {
-                  return sqrt(pow(v[0], 2) + pow(v[1], 2));
-                };
-                // ratio between two vectors
-                var r = function(u, v) {
-                  return (u[0] * v[0] + u[1] * v[1]) / (m(u) * m(v));
-                };
-                // angle between two vectors
-                var a = function(u, v) {
-                  return (u[0] * v[1] < u[1] * v[0] ? - 1 : 1) * acos(r(u,v));
-                };
-
-                // Calculate theta1 and delta theta F.6.5.4 + F.6.5.5
-                var t1 = a([1, 0], [(_x - _cx) / rx, (_y - _cy) / ry]);
-                var u = [(_x - _cx) / rx, (_y - _cy) / ry];
-                var v = [( - _x - _cx) / rx, ( - _y - _cy) / ry];
-                var dt = a(u, v);
-
-                if (r(u, v) <= -1) dt = PI;
-                if (r(u, v) >= 1) dt = 0;
-
-                // F.6.5.6
-                if (largeArcFlag)  {
-                  dt = mod(dt, PI * 2);
-                }
-
-                if (sweepFlag && dt > 0) {
-                  dt -= PI * 2;
-                }
-
-                var length = Two.Resolution;
-                var pa, pb, pc;
-
-                // Save a projection of our rotation and translation to apply
-                // to the set of points.
-                var projection = new Two.Matrix()
-                  .translate(cx, cy)
-                  .rotate(xAxisRotation);
-
-                // Create a resulting array of Two.Anchor's to export to the
-                // the path.
-                result = _.map(_.range(length), function(i) {
-
-                  var pct = 1 - (i / (length - 1));
-                  var theta = pct * dt + t1;
-
-                  var x = rx * cos(theta);
-                  var y = ry * sin(theta);
-
-                  var projected = projection.multiply(x, y, 1);
-
-                  pa = pb;
-                  pb = pc;
-                  pc = new Two.Anchor(
-                    projected.x, projected.y, 0, 0, 0, 0, Two.Commands.curve);
-
-                  if (pa && pb && pc) {
-                    getControlPoints(pa, pb, pc);
-                  }
-
-                  return pc;
-
-                });
-
-                result.push(
-                  new Two.Anchor(x4, y4, 0, 0, 0, 0, Two.Commands.curve));
-
-                coord = result[result.length - 1];
-                control = coord.controls.left;
+                coord = anchor;
+                control = undefined;
 
                 break;
 
@@ -3077,14 +3034,14 @@
 
   }
 
-  if (typeof define === 'function' && define.amd) {
+  if (typeof module != 'undefined' && module.exports) {
+    module.exports = Two;
+  } else if (typeof define === 'function' && define.amd) {
     define('two', [], function() {
       return Two;
     });
-  } else if (typeof module != 'undefined' && module.exports) {
-    module.exports = Two;
   }
 
   return Two;
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);

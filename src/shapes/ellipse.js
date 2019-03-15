@@ -100,8 +100,10 @@
 
     clone: function(parent) {
 
+      var rx = this.width / 2;
+      var ry = this.height / 2;
       var resolution = this.vertices.length;
-      var clone = new Ellipse(0, 0, this.width, this.height, resolution);
+      var clone = new Ellipse(0, 0, rx, ry, resolution);
 
       clone.translation.copy(this.translation);
       clone.rotation = this.rotation;
@@ -123,4 +125,4 @@
 
   Ellipse.MakeObservable(Ellipse.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);

@@ -83,8 +83,8 @@
      */
     MakeObservable: function(object) {
 
-      Object.defineProperty(object, 'translation', {
-        enumerable: true,
+      var translation = {
+        enumerable: false,
         get: function() {
           return this._translation;
         },
@@ -96,7 +96,10 @@
           this._translation.bind(Two.Events.change, this._renderer.flagMatrix);
           Shape.FlagMatrix.call(this);
         }
-      });
+      };
+
+      Object.defineProperty(object, 'translation', translation);
+      Object.defineProperty(object, 'position', translation);
 
       Object.defineProperty(object, 'rotation', {
         enumerable: true,
@@ -222,8 +225,8 @@
     /**
      * @name Two.Shape#_update
      * @function
-     * @param {Boolean} [bubbles=false] - Force the parent to `_update` as well.
      * @private
+     * @param {Boolean} [bubbles=false] - Force the parent to `_update` as well.
      * @description This is called before rendering happens by the renderer. This applies all changes necessary so that rendering is up-to-date but not updated more than it needs to be.
      * @nota-bene Try not to call this method more than once a frame.
      */
@@ -273,4 +276,4 @@
 
   Shape.MakeObservable(Shape.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);

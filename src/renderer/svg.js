@@ -70,7 +70,7 @@
       var l = points.length,
         last = l - 1,
         d, // The elusive last Two.Commands.move point
-        ret = '';
+        string = '';
 
       for (var i = 0; i < l; i++) {
         var b = points[i];
@@ -82,6 +82,7 @@
         var c = points[next];
 
         var vx, vy, ux, uy, ar, bl, br, cl;
+        var rx, ry, xAxisRotation, largeArcFlag, sweepFlag;
 
         // Access x and y directly,
         // bypassing the getter
@@ -92,6 +93,19 @@
 
           case Two.Commands.close:
             command = Two.Commands.close;
+            break;
+
+          case Two.Commands.arc:
+
+            rx = b.rx;
+            ry = b.ry;
+            xAxisRotation = b.xAxisRotation;
+            largeArcFlag = b.largeArcFlag;
+            sweepFlag = b.sweepFlag;
+
+            command = Two.Commands.arc + ' ' + rx + ' ' + ry + ' '
+              + xAxisRotation + ' ' + largeArcFlag + ' ' + sweepFlag + ' '
+              + x + ' ' + y;
             break;
 
           case Two.Commands.curve:
@@ -162,17 +176,20 @@
 
             command +=
               ' C ' + vx + ' ' + vy + ' ' + ux + ' ' + uy + ' ' + x + ' ' + y;
+
           }
 
-          command += ' Z';
+          if (b.command !== Two.Commands.close) {
+            command += ' Z';
+          }
 
         }
 
-        ret += command + ' ';
+        string += command + ' ';
 
       }
 
-      return ret;
+      return string;
 
     },
 
@@ -624,7 +641,9 @@
             !== this.stops.length;
 
           if (lengthChanged) {
-            this._renderer.elem.childNodes.length = 0;
+            while (this._renderer.elem.lastChild) {
+              this._renderer.elem.removeChild(this._renderer.elem.lastChild);
+            }
           }
 
           for (var i = 0; i < this.stops.length; i++) {
@@ -712,7 +731,9 @@
             !== this.stops.length;
 
           if (lengthChanged) {
-            this._renderer.elem.childNodes.length = 0;
+            while (this._renderer.elem.lastChild) {
+              this._renderer.elem.removeChild(this._renderer.elem.lastChild);
+            }
           }
 
           for (var i = 0; i < this.stops.length; i++) {
@@ -921,4 +942,4 @@
 
   });
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);

@@ -2,7 +2,7 @@
 
 MIT License
 
-Copyright (c) 2012 - 2017 jonobr1 / http://jonobr1.com
+Copyright (c) 2012 - 2019 jonobr1 / http://jonobr1.com
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -24,9 +24,19 @@ SOFTWARE.
 
 */
 
-(this || window).Two = (function(previousTwo) {
+(this || self || window).Two = (function(previousTwo) {
 
-  var root = typeof window != 'undefined' ? window : typeof global != 'undefined' ? global : null;
+  var root;
+  if (typeof window !== 'undefined') {
+    root = window;
+  } else if (typeof global !== 'undefined') {
+    root = global;
+  } else if (typeof self !== 'undefined') {
+    root = self
+  } else {
+    root = this;
+  }
+
   var toString = Object.prototype.toString;
   /**
    * @name _
@@ -245,6 +255,7 @@ SOFTWARE.
 
   var sin = Math.sin,
     cos = Math.cos,
+    acos = Math.acos,
     atan2 = Math.atan2,
     sqrt = Math.sqrt,
     round = Math.round,
@@ -455,7 +466,13 @@ SOFTWARE.
      * @name Two.Version
      * @property {String} - The current working version of the library.
      */
-    Version: 'v0.7.0',
+    Version: 'v0.7.0-beta.4',
+
+    /**
+     * @name Two.PublishDate
+     * @property {String} - The automatically generated publish date in the build process to verify version release candidates.
+     */
+    PublishDate: '2019-03-13T11:01:43+01:00',
 
     /**
      * @name Two.Identifier
@@ -488,6 +505,7 @@ SOFTWARE.
       move: 'M',
       line: 'L',
       curve: 'C',
+      arc: 'A',
       close: 'Z'
     },
 
@@ -572,14 +590,16 @@ SOFTWARE.
       /**
        * @name Two.Utils.shim
        * @function
-       * @param {Canvas} CanvasModule - The `Canvas` object provided by `node-canvas`.
-       * @returns {Canvas} Returns an instanced canvas object from the provided `node-canvas` `Canvas` object.
+       * @param {canvas} canvas - The instanced `Canvas` object provided by `node-canvas`.
+       * @param {Image} [Image] - The prototypical `Image` object provided by `node-canvas`. This is only necessary to pass if you're going to load bitmap imagery.
+       * @returns {canvas} Returns the instanced canvas object you passed from with additional attributes needed for Two.js.
        * @description Convenience method for defining all the dependencies from the npm package `node-canvas`. See [node-canvas]{@link https://github.com/Automattic/node-canvas} for additional information on setting up HTML5 `<canvas />` drawing in a node.js environment.
        */
-      shim: function(CanvasModule) {
-        var canvas = new CanvasModule();
+      shim: function(canvas, Image) {
         Two.CanvasRenderer.Utils.shim(canvas);
-        Two.Utils.Image = CanvasModule.Image;
+        if (!_.isUndefined(Image)) {
+          Two.Utils.Image = Image;
+        }
         Two.Utils.isHeadless = true;
         return canvas;
       },
@@ -661,7 +681,7 @@ SOFTWARE.
         Tolerance: {
           distance: 0.25,
           angle: 0,
-          epsilon: 0.01
+          epsilon: Number.EPSILON
         },
 
         // Lookup tables for abscissas and weights with values for n = 2 .. 16.
@@ -863,13 +883,43 @@ SOFTWARE.
       getSvgStyles: function(node) {
 
         var styles = {};
+        var attributes = Two.Utils.getSvgAttributes(node);
+        var length = Math.max(attributes.length, node.style.length);
 
-        for (var i = 0; i < node.style.length; i++) {
+        for (var i = 0; i < length; i++) {
+
           var command = node.style[i];
-          styles[command] = node.style[command];
+          var attribute = attributes[i];
+
+          if (command) {
+            styles[command] = node.style[command];
+          }
+          if (attribute) {
+            styles[attribute] = node.getAttribute(attribute);
+          }
+
         }
 
         return styles;
+
+      },
+
+      getSvgAttributes: function(node) {
+
+        var attributes = node.getAttributeNames();
+
+        // Reserved attributes to remove
+        var keywords = ['id', 'class', 'transform', 'xmlns', 'viewBox'];
+
+        for (var i = 0; i < keywords.length; i++) {
+          var keyword = keywords[i];
+          var index = _.indexOf(attributes, keyword);
+          if (index >= 0) {
+            attributes.splice(index, 1);
+          }
+        }
+
+        return attributes;
 
       },
 
@@ -1131,6 +1181,9 @@ SOFTWARE.
 
           _.each(commands.slice(0), function(command, i) {
 
+            var number, fid, lid, numbers, first, s;
+            var j, k, ct, l, times;
+
             var type = command[0];
             var lower = type.toLowerCase();
             var items = command.slice(1).trim().split(/[\s,]+|(?=\s?[+\-])/);
@@ -1139,19 +1192,21 @@ SOFTWARE.
 
             // Handle double decimal values e.g: 48.6037.71.8
             // Like: https://m.abcsofchinese.com/images/svg/亼ji2.svg
-            for (var j = 0; j < items.length; j++) {
+            for (j = 0; j < items.length; j++) {
 
-              var number = items[j];
+              number = items[j];
+              fid = number.indexOf('.');
+              lid = number.lastIndexOf('.');
 
-              if (number.indexOf( '.' ) !== number.lastIndexOf( '.' )) {
+              if (fid !== lid) {
 
-                var numbers = number.split('.');
-                var first = numbers[0] + '.' + numbers[1];
+                numbers = number.split('.');
+                first = numbers[0] + '.' + numbers[1];
 
-                items.splice(i, 1, first);
+                items.splice(j, 1, first);
 
-                for (var s = 2; s < numbers.length; s++) {
-                  items.splice(i + s - 1, 0, '0.' + numbers[s]);
+                for (s = 2; s < numbers.length; s++) {
+                  items.splice(j + s - 1, 0, '0.' + numbers[s]);
                 }
 
                 hasDoubleDecimals = true;
@@ -1200,11 +1255,12 @@ SOFTWARE.
                 break;
             }
 
+            // This means we have a polybezier.
             if (bin) {
 
-              for (var j = 0, l = items.length, times = 0; j < l; j+=bin) {
+              for (j = 0, l = items.length, times = 0; j < l; j+=bin) {
 
-                var ct = type;
+                ct = type;
                 if (times > 0) {
 
                   switch (type) {
@@ -1218,7 +1274,7 @@ SOFTWARE.
 
                 }
 
-                result.push([ct].concat(items.slice(j, j + bin)).join(' '));
+                result.push(ct + items.slice(j, j + bin).join(' '));
                 times++;
 
               }
@@ -1456,7 +1512,7 @@ SOFTWARE.
 
                 var rx = parseFloat(coords[0]);
                 var ry = parseFloat(coords[1]);
-                var xAxisRotation = parseFloat(coords[2]) * PI / 180;
+                var xAxisRotation = parseFloat(coords[2]);// * PI / 180;
                 var largeArcFlag = parseFloat(coords[3]);
                 var sweepFlag = parseFloat(coords[4]);
 
@@ -1468,117 +1524,18 @@ SOFTWARE.
                   y4 += y1;
                 }
 
-                // http://www.w3.org/TR/SVG/implnote.html#ArcConversionEndpointToCenter
+                var anchor = new Two.Anchor(x4, y4);
+                anchor.command = Two.Commands.arc;
+                anchor.rx = rx;
+                anchor.ry = ry;
+                anchor.xAxisRotation = xAxisRotation;
+                anchor.largeArcFlag = largeArcFlag;
+                anchor.sweepFlag = sweepFlag;
 
-                // Calculate midpoint mx my
-                var mx = (x4 - x1) / 2;
-                var my = (y4 - y1) / 2;
+                result = anchor;
 
-                // Calculate x1' y1' F.6.5.1
-                var _x = mx * cos(xAxisRotation) + my * sin(xAxisRotation);
-                var _y = - mx * sin(xAxisRotation) + my * cos(xAxisRotation);
-
-                var rx2 = rx * rx;
-                var ry2 = ry * ry;
-                var _x2 = _x * _x;
-                var _y2 = _y * _y;
-
-                // adjust radii
-                var l = _x2 / rx2 + _y2 / ry2;
-                if (l > 1) {
-                  rx *= sqrt(l);
-                  ry *= sqrt(l);
-                }
-
-                var amp = sqrt(
-                  (rx2 * ry2 - rx2 * _y2 - ry2 * _x2) / (rx2 * _y2 + ry2 * _x2));
-
-                if (_.isNaN(amp)) {
-                  amp = 0;
-                } else if (largeArcFlag != sweepFlag && amp > 0) {
-                  amp *= -1;
-                }
-
-                // Calculate cx' cy' F.6.5.2
-                var _cx = amp * rx * _y / ry;
-                var _cy = - amp * ry * _x / rx;
-
-                // Calculate cx cy F.6.5.3
-                var cx = _cx * cos(xAxisRotation) - _cy * sin(xAxisRotation)
-                  + (x1 + x4) / 2;
-                var cy = _cx * sin(xAxisRotation) + _cy * cos(xAxisRotation)
-                  + (y1 + y4) / 2;
-
-                // vector magnitude
-                var m = function(v) {
-                  return sqrt(pow(v[0], 2) + pow(v[1], 2));
-                };
-                // ratio between two vectors
-                var r = function(u, v) {
-                  return (u[0] * v[0] + u[1] * v[1]) / (m(u) * m(v));
-                };
-                // angle between two vectors
-                var a = function(u, v) {
-                  return (u[0] * v[1] < u[1] * v[0] ? - 1 : 1) * acos(r(u,v));
-                };
-
-                // Calculate theta1 and delta theta F.6.5.4 + F.6.5.5
-                var t1 = a([1, 0], [(_x - _cx) / rx, (_y - _cy) / ry]);
-                var u = [(_x - _cx) / rx, (_y - _cy) / ry];
-                var v = [( - _x - _cx) / rx, ( - _y - _cy) / ry];
-                var dt = a(u, v);
-
-                if (r(u, v) <= -1) dt = PI;
-                if (r(u, v) >= 1) dt = 0;
-
-                // F.6.5.6
-                if (largeArcFlag)  {
-                  dt = mod(dt, PI * 2);
-                }
-
-                if (sweepFlag && dt > 0) {
-                  dt -= PI * 2;
-                }
-
-                var length = Two.Resolution;
-                var pa, pb, pc;
-
-                // Save a projection of our rotation and translation to apply
-                // to the set of points.
-                var projection = new Two.Matrix()
-                  .translate(cx, cy)
-                  .rotate(xAxisRotation);
-
-                // Create a resulting array of Two.Anchor's to export to the
-                // the path.
-                result = _.map(_.range(length), function(i) {
-
-                  var pct = 1 - (i / (length - 1));
-                  var theta = pct * dt + t1;
-
-                  var x = rx * cos(theta);
-                  var y = ry * sin(theta);
-
-                  var projected = projection.multiply(x, y, 1);
-
-                  pa = pb;
-                  pb = pc;
-                  pc = new Two.Anchor(
-                    projected.x, projected.y, 0, 0, 0, 0, Two.Commands.curve);
-
-                  if (pa && pb && pc) {
-                    getControlPoints(pa, pb, pc);
-                  }
-
-                  return pc;
-
-                });
-
-                result.push(
-                  new Two.Anchor(x4, y4, 0, 0, 0, 0, Two.Commands.curve));
-
-                coord = result[result.length - 1];
-                control = coord.controls.left;
+                coord = anchor;
+                control = undefined;
 
                 break;
 
@@ -3103,17 +3060,17 @@ SOFTWARE.
 
   }
 
-  if (typeof define === 'function' && define.amd) {
+  if (typeof module != 'undefined' && module.exports) {
+    module.exports = Two;
+  } else if (typeof define === 'function' && define.amd) {
     define('two', [], function() {
       return Two;
     });
-  } else if (typeof module != 'undefined' && module.exports) {
-    module.exports = Two;
   }
 
   return Two;
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -3181,7 +3138,7 @@ SOFTWARE.
 
   });
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -3988,7 +3945,7 @@ SOFTWARE.
 
   Vector.MakeObservable(Vector.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -4215,6 +4172,15 @@ SOFTWARE.
         this.relative = v.relative;
       }
 
+      // TODO: Hack for `Two.Commands.arc`
+      if (this.command === Two.Commands.arc) {
+        this.rx = v.rx;
+        this.ry = v.ry;
+        this.xAxisRotation = v.xAxisRotation;
+        this.largeArcFlag = v.largeArcFlag;
+        this.sweepFlag = v.sweepFlag;
+      }
+
       return this;
 
     },
@@ -4288,7 +4254,7 @@ SOFTWARE.
 
   Two.Anchor.MakeObservable(Two.Anchor.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -4802,7 +4768,7 @@ SOFTWARE.
 
   });
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -4876,7 +4842,7 @@ SOFTWARE.
       var l = points.length,
         last = l - 1,
         d, // The elusive last Two.Commands.move point
-        ret = '';
+        string = '';
 
       for (var i = 0; i < l; i++) {
         var b = points[i];
@@ -4888,6 +4854,7 @@ SOFTWARE.
         var c = points[next];
 
         var vx, vy, ux, uy, ar, bl, br, cl;
+        var rx, ry, xAxisRotation, largeArcFlag, sweepFlag;
 
         // Access x and y directly,
         // bypassing the getter
@@ -4898,6 +4865,19 @@ SOFTWARE.
 
           case Two.Commands.close:
             command = Two.Commands.close;
+            break;
+
+          case Two.Commands.arc:
+
+            rx = b.rx;
+            ry = b.ry;
+            xAxisRotation = b.xAxisRotation;
+            largeArcFlag = b.largeArcFlag;
+            sweepFlag = b.sweepFlag;
+
+            command = Two.Commands.arc + ' ' + rx + ' ' + ry + ' '
+              + xAxisRotation + ' ' + largeArcFlag + ' ' + sweepFlag + ' '
+              + x + ' ' + y;
             break;
 
           case Two.Commands.curve:
@@ -4968,17 +4948,20 @@ SOFTWARE.
 
             command +=
               ' C ' + vx + ' ' + vy + ' ' + ux + ' ' + uy + ' ' + x + ' ' + y;
+
           }
 
-          command += ' Z';
+          if (b.command !== Two.Commands.close) {
+            command += ' Z';
+          }
 
         }
 
-        ret += command + ' ';
+        string += command + ' ';
 
       }
 
-      return ret;
+      return string;
 
     },
 
@@ -5223,8 +5206,8 @@ SOFTWARE.
           changed['stroke-miterlimit'] = this._miter;
         }
 
-        if (this._flagDasharray) {
-          changed['stroke-dasharray'] = this._dasharray;
+        if (this.dashes && this.dashes.length > 0) {
+          changed['stroke-dasharray'] = this.dashes.join(' ');
         }
 
         // If there is no attached DOM element yet,
@@ -5343,6 +5326,9 @@ SOFTWARE.
         if (this._flagVisible) {
           changed.visibility = this._visible ? 'visible' : 'hidden';
         }
+        if (this.dashes && this.dashes.length > 0) {
+          changed['stroke-dasharray'] = this.dashes.join(' ');
+        }
 
         if (!this._renderer.elem) {
 
@@ -5427,7 +5413,9 @@ SOFTWARE.
             !== this.stops.length;
 
           if (lengthChanged) {
-            this._renderer.elem.childNodes.length = 0;
+            while (this._renderer.elem.lastChild) {
+              this._renderer.elem.removeChild(this._renderer.elem.lastChild);
+            }
           }
 
           for (var i = 0; i < this.stops.length; i++) {
@@ -5515,7 +5503,9 @@ SOFTWARE.
             !== this.stops.length;
 
           if (lengthChanged) {
-            this._renderer.elem.childNodes.length = 0;
+            while (this._renderer.elem.lastChild) {
+              this._renderer.elem.removeChild(this._renderer.elem.lastChild);
+            }
           }
 
           for (var i = 0; i < this.stops.length; i++) {
@@ -5724,7 +5714,7 @@ SOFTWARE.
 
   });
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -5734,6 +5724,15 @@ SOFTWARE.
   var mod = Two.Utils.mod, toFixed = Two.Utils.toFixed;
   var getRatio = Two.Utils.getRatio;
   var _ = Two.Utils;
+  var emptyArray = [];
+  var TWO_PI = Math.PI * 2,
+    max = Math.max,
+    min = Math.min,
+    abs = Math.abs,
+    sin = Math.sin,
+    cos = Math.cos,
+    acos = Math.acos,
+    sqrt = Math.sqrt;
 
   // Returns true if this is a non-transforming matrix
   var isDefaultMatrix = function (m) {
@@ -5832,7 +5831,7 @@ SOFTWARE.
 
         var matrix, stroke, linewidth, fill, opacity, visible, cap, join, miter,
             closed, commands, length, last, next, prev, a, b, c, d, ux, uy, vx, vy,
-            ar, bl, br, cl, x, y, mask, clip, defaultMatrix, isOffset, dasharray;
+            ar, bl, br, cl, x, y, mask, clip, defaultMatrix, isOffset, dashes;
 
         // TODO: Add a check here to only invoke _update if need be.
         this._update();
@@ -5851,7 +5850,7 @@ SOFTWARE.
         length = commands.length;
         last = length - 1;
         defaultMatrix = isDefaultMatrix(matrix);
-        dasharray = this._dasharray;
+        dashes = this.dashes;
 
         // mask = this._mask;
         clip = this._clip;
@@ -5909,8 +5908,8 @@ SOFTWARE.
           ctx.globalAlpha = opacity;
         }
 
-        if (dasharray) {
-          ctx.setLineDash(dasharray.split(' '));
+        if (dashes && dashes.length > 0) {
+          ctx.setLineDash(dashes);
         }
 
         ctx.beginPath();
@@ -5926,6 +5925,23 @@ SOFTWARE.
 
             case Two.Commands.close:
               ctx.closePath();
+              break;
+
+            case Two.Commands.arc:
+
+              var rx = b.rx;
+              var ry = b.ry;
+              var xAxisRotation = b.xAxisRotation;
+              var largeArcFlag = b.largeArcFlag;
+              var sweepFlag = b.sweepFlag;
+
+              prev = closed ? mod(i - 1, length) : max(i - 1, 0);
+              a = commands[prev];
+
+              var ax = toFixed(a.x);
+              var ay = toFixed(a.y);
+
+              canvas.renderSvgArcCommand(ctx, ax, ay, rx, ry, largeArcFlag, sweepFlag, xAxisRotation, x, y);
               break;
 
             case Two.Commands.curve:
@@ -6044,6 +6060,10 @@ SOFTWARE.
           ctx.clip();
         }
 
+        if (dashes && dashes.length > 0) {
+          ctx.setLineDash(emptyArray);
+        }
+
         return this.flagReset();
 
       }
@@ -6066,6 +6086,7 @@ SOFTWARE.
         var defaultMatrix = isDefaultMatrix(matrix);
         var isOffset = fill._renderer && fill._renderer.offset
           && stroke._renderer && stroke._renderer.offset;
+        var dashes = this.dashes;
 
         var a, b, c, d, e, sx, sy;
 
@@ -6122,6 +6143,9 @@ SOFTWARE.
         }
         if (_.isNumber(opacity)) {
           ctx.globalAlpha = opacity;
+        }
+        if (dashes && dashes.length > 0) {
+          ctx.setLineDash(dashes);
         }
 
         if (!clip && !parentClipped) {
@@ -6193,6 +6217,10 @@ SOFTWARE.
         // TODO: Test for text
         if (clip && !parentClipped) {
           ctx.clip();
+        }
+
+        if (dashes && dashes.length > 0) {
+          ctx.setLineDash(emptyArray);
         }
 
         return this.flagReset();
@@ -6310,6 +6338,67 @@ SOFTWARE.
 
       }
 
+    },
+
+    renderSvgArcCommand: function(ctx, ax, ay, rx, ry, largeArcFlag, sweepFlag, xAxisRotation, x, y) {
+
+      xAxisRotation = xAxisRotation * Math.PI / 180;
+
+      // Ensure radii are positive
+      rx = abs(rx);
+      ry = abs(ry);
+
+      // Compute (x1′, y1′)
+      var dx2 = (ax - x) / 2.0;
+      var dy2 = (ay - y) / 2.0;
+      var x1p = cos(xAxisRotation) * dx2 + sin(xAxisRotation) * dy2;
+      var y1p = - sin(xAxisRotation) * dx2 + cos(xAxisRotation) * dy2;
+
+      // Compute (cx′, cy′)
+      var rxs = rx * rx;
+      var rys = ry * ry;
+      var x1ps = x1p * x1p;
+      var y1ps = y1p * y1p;
+
+      // Ensure radii are large enough
+      var cr = x1ps / rxs + y1ps / rys;
+
+      if (cr > 1) {
+
+        // scale up rx,ry equally so cr == 1
+        var s = sqrt(cr);
+        rx = s * rx;
+        ry = s * ry;
+        rxs = rx * rx;
+        rys = ry * ry;
+
+      }
+
+      var dq = (rxs * y1ps + rys * x1ps);
+      var pq = (rxs * rys - dq) / dq;
+      var q = sqrt(max(0, pq));
+      if (largeArcFlag === sweepFlag) q = - q;
+      var cxp = q * rx * y1p / ry;
+      var cyp = - q * ry * x1p / rx;
+
+      // Step 3: Compute (cx, cy) from (cx′, cy′)
+      var cx = cos(xAxisRotation) * cxp
+        - sin(xAxisRotation) * cyp + (ax + x) / 2;
+      var cy = sin(xAxisRotation) * cxp
+        + cos(xAxisRotation) * cyp + (ay + y) / 2;
+
+      // Step 4: Compute θ1 and Δθ
+      var startAngle = svgAngle(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+      var delta = svgAngle((x1p - cxp) / rx, (y1p - cyp) / ry,
+        (- x1p - cxp) / rx, (- y1p - cyp) / ry) % TWO_PI;
+
+      var endAngle = startAngle + delta;
+
+      var clockwise = sweepFlag === 0;
+
+      renderArcEstimate(ctx, cx, cy, rx, ry, startAngle, endAngle,
+        clockwise, xAxisRotation);
+
     }
 
   };
@@ -6390,11 +6479,90 @@ SOFTWARE.
 
   });
 
+  function renderArcEstimate(ctx, ox, oy, rx, ry, startAngle, endAngle, clockwise, xAxisRotation) {
+
+    var epsilon = Two.Utils.Curve.Tolerance.epsilon;
+    var deltaAngle = endAngle - startAngle;
+    var samePoints = Math.abs(deltaAngle) < epsilon;
+
+    // ensures that deltaAngle is 0 .. 2 PI
+    deltaAngle = mod(deltaAngle, TWO_PI);
+
+    if (deltaAngle < epsilon) {
+
+      if (samePoints) {
+
+        deltaAngle = 0;
+
+      } else {
+
+        deltaAngle = TWO_PI;
+
+      }
+
+    }
+
+    if (clockwise === true && ! samePoints) {
+
+      if (deltaAngle === TWO_PI) {
+
+        deltaAngle = - TWO_PI;
+
+      } else {
+
+        deltaAngle = deltaAngle - TWO_PI;
+
+      }
+
+    }
+
+    for (var i = 0; i < Two.Resolution; i++) {
+
+      var t = i / (Two.Resolution - 1);
+
+      var angle = startAngle + t * deltaAngle;
+      var x = ox + rx * Math.cos(angle);
+      var y = oy + ry * Math.sin(angle);
+
+      if (xAxisRotation !== 0) {
+
+        var cos = Math.cos(xAxisRotation);
+        var sin = Math.sin(xAxisRotation);
+
+        var tx = x - ox;
+        var ty = y - oy;
+
+        // Rotate the point about the center of the ellipse.
+        x = tx * cos - ty * sin + ox;
+        y = tx * sin + ty * cos + oy;
+
+      }
+
+      ctx.lineTo(x, y);
+
+    }
+
+  }
+
+  function svgAngle(ux, uy, vx, vy) {
+
+    var dot = ux * vx + uy * vy;
+    var len = sqrt(ux * ux + uy * uy) *  sqrt(vx * vx + vy * vy);
+    // floating point precision, slightly over values appear
+    var ang = acos(max(-1, min(1, dot / len)));
+    if ((ux * vy - uy * vx) < 0) {
+      ang = - ang;
+    }
+
+    return ang;
+
+  }
+
   function resetTransform(ctx) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -6410,6 +6578,7 @@ SOFTWARE.
     getRatio = Two.Utils.getRatio,
     getComputedMatrix = Two.Utils.getComputedMatrix,
     toFixed = Two.Utils.toFixed,
+    CanvasUtils = Two[Two.Types.canvas].Utils,
     _ = Two.Utils;
 
   var webgl = {
@@ -6506,6 +6675,11 @@ SOFTWARE.
           }
         }
 
+        for (var i = 0; i < this.children.length; i++) {
+          var child = this.children[i];
+          webgl[child._renderer.type].render.call(child, gl, program);
+        }
+
         this.children.forEach(webgl.group.renderChild, {
           gl: gl,
           program: program
@@ -6553,6 +6727,7 @@ SOFTWARE.
         var join = elem._join;
         var miter = elem._miter;
         var closed = elem._closed;
+        var dashes = elem.dashes;
         var length = commands.length;
         var last = length - 1;
 
@@ -6597,6 +6772,10 @@ SOFTWARE.
           ctx.globalAlpha = opacity;
         }
 
+        if (dashes && dashes.length > 0) {
+          ctx.setLineDash(dashes);
+        }
+
         var d;
         ctx.save();
         ctx.scale(scale, scale);
@@ -6614,6 +6793,23 @@ SOFTWARE.
 
             case Two.Commands.close:
               ctx.closePath();
+              break;
+
+            case Two.Commands.arc:
+
+              var rx = b.rx;
+              var ry = b.ry;
+              var xAxisRotation = b.xAxisRotation;
+              var largeArcFlag = b.largeArcFlag;
+              var sweepFlag = b.sweepFlag;
+
+              prev = closed ? mod(i - 1, length) : max(i - 1, 0);
+              a = commands[prev];
+
+              var ax = toFixed(a.x);
+              var ay = toFixed(a.y);
+
+              CanvasUtils.renderSvgArcCommand(ctx, ax, ay, rx, ry, largeArcFlag, sweepFlag, xAxisRotation, x, y);
               break;
 
             case Two.Commands.curve:
@@ -6826,6 +7022,7 @@ SOFTWARE.
           || this._flagStroke || this._flagLinewidth || this._flagOpacity
           || parent._flagOpacity || this._flagVisible || this._flagCap
           || this._flagJoin || this._flagMiter || this._flagScale
+          || (this.dashes && this.dashes.length > 0)
           || !this._renderer.texture;
 
         if (flagParentMatrix || flagMatrix) {
@@ -6920,6 +7117,7 @@ SOFTWARE.
         var linewidth = elem._linewidth * scale;
         var fill = elem._fill;
         var opacity = elem._renderer.opacity || elem._opacity;
+        var dashes = elem.dashes;
 
         canvas.width = Math.max(Math.ceil(elem._renderer.rect.width * scale), 1);
         canvas.height = Math.max(Math.ceil(elem._renderer.rect.height * scale), 1);
@@ -6964,6 +7162,9 @@ SOFTWARE.
         }
         if (_.isNumber(opacity)) {
           ctx.globalAlpha = opacity;
+        }
+        if (dashes && dashes.length > 0) {
+          ctx.setLineDash(dashes);
         }
 
         ctx.save();
@@ -7045,12 +7246,12 @@ SOFTWARE.
         ctx.textBaseline = elem._baseline;
 
         // TODO: Estimate this better
-        var width = ctx.measureText(elem._value).width;
-        var height = Math.max(elem._size || elem._leading);
+        var width = ctx.measureText(elem._value).width * 1.25;
+        var height = Math.max(elem._size, elem._leading) * 1.25;
 
         if (this._linewidth && !webgl.isHidden.test(this._stroke)) {
-          // width += this._linewidth; // TODO: Not sure if the `measure` calcs this.
-          height += this._linewidth;
+          width += this._linewidth * 2;
+          height += this._linewidth * 2;
         }
 
         var w = width / 2;
@@ -7124,6 +7325,7 @@ SOFTWARE.
           || this._flagValue || this._flagFamily || this._flagSize
           || this._flagLeading || this._flagAlignment || this._flagBaseline
           || this._flagStyle || this._flagWeight || this._flagDecoration
+          || (this.dashes && this.dashes.length > 0)
           || !this._renderer.texture;
 
         if (flagParentMatrix || flagMatrix) {
@@ -7509,6 +7711,11 @@ SOFTWARE.
     var params, gl, vs, fs;
     this.domElement = options.domElement || document.createElement('canvas');
 
+    if (!_.isUndefined(options.offscreenElement)) {
+      webgl.canvas = options.offscreenElement;
+      webgl.ctx = webgl.canvas.getContext('2d');
+    }
+
     // Everything drawn on the canvas needs to come from the stage.
     this.scene = new Two.Group();
     this.scene.parent = this;
@@ -7592,10 +7799,12 @@ SOFTWARE.
       this.domElement.width = width * this.ratio;
       this.domElement.height = height * this.ratio;
 
-      _.extend(this.domElement.style, {
-        width: width + 'px',
-        height: height + 'px'
-      });
+      if (_.isObject(this.domElement.style)) {
+        _.extend(this.domElement.style, {
+          width: width + 'px',
+          height: height + 'px'
+        });
+      }
 
       width *= this.ratio;
       height *= this.ratio;
@@ -7632,7 +7841,7 @@ SOFTWARE.
 
   });
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -7719,8 +7928,8 @@ SOFTWARE.
      */
     MakeObservable: function(object) {
 
-      Object.defineProperty(object, 'translation', {
-        enumerable: true,
+      var translation = {
+        enumerable: false,
         get: function() {
           return this._translation;
         },
@@ -7732,7 +7941,10 @@ SOFTWARE.
           this._translation.bind(Two.Events.change, this._renderer.flagMatrix);
           Shape.FlagMatrix.call(this);
         }
-      });
+      };
+
+      Object.defineProperty(object, 'translation', translation);
+      Object.defineProperty(object, 'position', translation);
 
       Object.defineProperty(object, 'rotation', {
         enumerable: true,
@@ -7858,8 +8070,8 @@ SOFTWARE.
     /**
      * @name Two.Shape#_update
      * @function
-     * @param {Boolean} [bubbles=false] - Force the parent to `_update` as well.
      * @private
+     * @param {Boolean} [bubbles=false] - Force the parent to `_update` as well.
      * @description This is called before rendering happens by the renderer. This applies all changes necessary so that rendering is up-to-date but not updated more than it needs to be.
      * @nota-bene Try not to call this method more than once a frame.
      */
@@ -7909,7 +8121,7 @@ SOFTWARE.
 
   Shape.MakeObservable(Shape.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -8009,7 +8221,7 @@ SOFTWARE.
 
     /**
      * @name Two.Path#className
-     * @property {String} - A class name to be searched by in {@link Two.Group}s.
+     * @property {String} - A class to be applied to the element to be compatible with CSS styling. Only available for the SVG renderer.
      */
     this.className = '';
 
@@ -8056,11 +8268,12 @@ SOFTWARE.
     this.automatic = !manual;
 
     /**
-     * @name Two.Path#dasharray
-     * @property {String} - List of space-separated dash and gap values.
+     * @name Two.Path#dashes
+     * @property {Number[]} - Array of numbers. Odd indices represent dash length. Even indices represent dash space.
+     * @description A list of numbers that represent the repeated dash length and dash space applied to the stroke of the text.
      * @see {@link https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/stroke-dasharray} for more information on the SVG stroke-dasharray attribute.
      */
-    this.dasharray = '';
+    this.dashes = [];
 
   };
 
@@ -8080,7 +8293,6 @@ SOFTWARE.
       'cap',
       'join',
       'miter',
-      'dasharray',
 
       'closed',
       'curved',
@@ -8088,6 +8300,10 @@ SOFTWARE.
       'beginning',
       'ending'
     ],
+
+    Utils: {
+      getCurveLength: getCurveLength
+    },
 
     /**
      * @name Two.Path.FlagVertices
@@ -8166,7 +8382,7 @@ SOFTWARE.
 
       // Only the 7 defined properties are flagged like this. The subsequent
       // properties behave differently and need to be hand written.
-      _.each(Path.Properties.slice(2, 10), Two.Utils.defineProperty, object);
+      _.each(Path.Properties.slice(2, 9), Two.Utils.defineProperty, object);
 
       Object.defineProperty(object, 'fill', {
         enumerable: true,
@@ -8222,6 +8438,10 @@ SOFTWARE.
         }
       });
 
+      /**
+       * @name Two.Path#length
+       * @property {Number} - The sum of distances between all {@link Two.Path#vertices}.
+       */
       Object.defineProperty(object, 'length', {
         get: function() {
           if (this._flagLength) {
@@ -8314,7 +8534,12 @@ SOFTWARE.
           }
 
           // Create new Collection with copy of vertices
-          this._collection = new Two.Utils.Collection(vertices || []);//.slice(0));
+          if (vertices instanceof Two.Utils.Collection) {
+            this._collection = vertices;
+          } else {
+            this._collection = new Two.Utils.Collection(vertices || []);
+          }
+
 
           // Listen for Collection changes and bind / unbind
           this._collection
@@ -8437,66 +8662,139 @@ SOFTWARE.
      */
     _flagClip: false,
 
-    /**
-     * @name Two.Path#_flagDashArray
-     * @private
-     * @property {Boolean} - Determines whether the {@link Two.Path#clip} needs updating.
-     */
-    _flagDasharray: false,
-
     // Underlying Properties
 
     /**
      * @name Two.Path#_length
      * @private
-     * @property {Number} - The sum of distances between all {@link Two.Path#vertices}.
+     * @see {@link Two.Path#length}
      */
     _length: 0,
 
     /**
      * @name Two.Path#_fill
      * @private
-     * @property {(CssColor|Two.Gradient|Two.Texture)} - The value of what the path should be filled in with.
+     * @see {@link Two.Path#fill}
      */
     _fill: '#fff',
 
     /**
      * @name Two.Path#_stroke
      * @private
-     * @property {(CssColor|Two.Gradient|Two.Texture)} - The value of what the path should be outlined in with.
+     * @see {@link Two.Path#stroke}
      */
     _stroke: '#000',
+
+    /**
+     * @name Two.Path#_linewidth
+     * @private
+     * @see {@link Two.Path#linewidth}
+     */
     _linewidth: 1.0,
+
+    /**
+     * @name Two.Path#_opacity
+     * @private
+     * @see {@link Two.Path#opacity}
+     */
     _opacity: 1.0,
+
+    /**
+     * @name Two.Path#_className
+     * @private
+     * @see {@link Two.Path#className}
+     */
     _className: '',
+
+    /**
+     * @name Two.Path#_visible
+     * @private
+     * @see {@link Two.Path#visible}
+     */
     _visible: true,
 
+    /**
+     * @name Two.Path#_cap
+     * @private
+     * @see {@link Two.Path#cap}
+     */
     _cap: 'round',
+
+    /**
+     * @name Two.Path#_join
+     * @private
+     * @see {@link Two.Path#join}
+     */
     _join: 'round',
+
+    /**
+     * @name Two.Path#_miter
+     * @private
+     * @see {@link Two.Path#miter}
+     */
     _miter: 4,
 
+    /**
+     * @name Two.Path#_closed
+     * @private
+     * @see {@link Two.Path#closed}
+     */
     _closed: true,
+
+    /**
+     * @name Two.Path#_curved
+     * @private
+     * @see {@link Two.Path#curved}
+     */
     _curved: false,
+
+    /**
+     * @name Two.Path#_automatic
+     * @private
+     * @see {@link Two.Path#automatic}
+     */
     _automatic: true,
+
+    /**
+     * @name Two.Path#_beginning
+     * @private
+     * @see {@link Two.Path#beginning}
+     */
     _beginning: 0,
+
+    /**
+     * @name Two.Path#_ending
+     * @private
+     * @see {@link Two.Path#ending}
+     */
     _ending: 1.0,
 
+    /**
+     * @name Two.Path#_clip
+     * @private
+     * @see {@link Two.Path#clip}
+     */
     _clip: false,
-    _dasharray: '',
 
     constructor: Path,
 
+    /**
+     * @name Two.Path#clone
+     * @function
+     * @param {Two.Group} [parent] - The parent group or scene to add the clone to.
+     * @returns {Two.Path}
+     * @description Create a new instance of {@link Two.Path} with the same properties of the current path.
+     */
     clone: function(parent) {
 
-      var points = _.map(this.vertices, function(v) {
-        return v.clone();
-      });
+      var clone = new Path();
 
-      var clone = new Path(points, this.closed, this.curved, !this.automatic);
+      clone.vertices = this.vertices;
 
-      _.each(Path.Properties, function(k) {
+      for (var i = 0; i < Path.Properties.length; i++) {
+        var k = Path.Properties[i];
         clone[k] = this[k];
-      }, this);
+      }
 
       clone.translation.copy(this.translation);
       clone.rotation = this.rotation;
@@ -8510,6 +8808,12 @@ SOFTWARE.
 
     },
 
+    /**
+     * @name Two.Path#toObject
+     * @function
+     * @returns {Object}
+     * @description Return a JSON compatible plain object that represents the path.
+     */
     toObject: function() {
 
       var result = {
@@ -8530,19 +8834,30 @@ SOFTWARE.
 
     },
 
+    /**
+     * @name Two.Path#noFill
+     * @function
+     * @description Short hand method to set fill to `transparent`.
+     */
     noFill: function() {
       this.fill = 'transparent';
       return this;
     },
 
+    /**
+     * @name Two.Path#noStroke
+     * @function
+     * @description Short hand method to set stroke to `transparent`.
+     */
     noStroke: function() {
       this.stroke = 'transparent';
       return this;
     },
 
     /**
-     * @function Two.Path#corner
-     * @description Orient the vertices of the shape to the upper lefthand corner of the path.
+     * @name Two.Path#corner
+     * @function
+     * @description Orient the vertices of the shape to the upper left-hand corner of the path.
      */
     corner: function() {
 
@@ -8562,7 +8877,8 @@ SOFTWARE.
     },
 
     /**
-     * @function Two.Path#center
+     * @name Two.Path#center
+     * @function
      * @description Orient the vertices of the shape to the center of the path.
      */
     center: function() {
@@ -8585,7 +8901,8 @@ SOFTWARE.
     },
 
     /**
-     * @function Two.Path#remove
+     * @name Two.Path#remove
+     * @function
      * @description Remove self from the scene / parent.
      */
     remove: function() {
@@ -8601,10 +8918,11 @@ SOFTWARE.
     },
 
     /**
-     * @function Two.Path#getBoundingClientRect
+     * @name Two.Path#getBoundingClientRect
+     * @function
      * @param {Boolean} [shallow=false] - Describes whether to calculate off local matrix or world matrix.
      * @returns {Object} - Returns object with top, left, right, bottom, width, height attributes.
-     * @description Return an object with top, left, right, bottom, width, and height parameters of the group.
+     * @description Return an object with top, left, right, bottom, width, and height parameters of the path.
      */
     getBoundingClientRect: function(shallow) {
       var matrix, border, l, x, y, i, v0, c0, c1, v1;
@@ -8701,7 +9019,8 @@ SOFTWARE.
     },
 
     /**
-     * @function Two.Path#getPointAt
+     * @name Two.Path#getPointAt
+     * @function
      * @param {Boolean} t - Percentage value describing where on the Two.Path to estimate and assign coordinate values.
      * @param {Two.Vector} [obj=undefined] - Object to apply calculated x, y to. If none available returns new Object.
      * @returns {Object}
@@ -8839,8 +9158,10 @@ SOFTWARE.
     },
 
     /**
-     * @function Two.Path#plot
+     * @name Two.Path#plot
+     * @function
      * @description Based on closed / curved and sorting of vertices plot where all points should be and where the respective handles should be too.
+     * @nota-bene While this method is public it is internally called by {@link Two.Path#_update} when `automatic = true`.
      */
     plot: function() {
 
@@ -8857,6 +9178,12 @@ SOFTWARE.
 
     },
 
+    /**
+     * @name Two.Path#subdivide
+     * @function
+     * @param {Integer} limit - How many times to recurse subdivisions.
+     * @description Insert a {@link Two.Anchor} at the midpoint between every item in {@link Two.Path#vertices}.
+     */
     subdivide: function(limit) {
       //TODO: DRYness (function below)
       this._update();
@@ -8933,6 +9260,14 @@ SOFTWARE.
 
     },
 
+    /**
+     * @name Two.Path#_updateLength
+     * @function
+     * @private
+     * @param {Integer} [limit=] -
+     * @param {Boolean} [silent=false] - If set to `true` then the path isn't updated before calculation. Useful for internal use.
+     * @description Recalculate the {@link Two.Path#length} value.
+     */
     _updateLength: function(limit, silent) {
       //TODO: DRYness (function above)
       if (!silent) {
@@ -8982,6 +9317,14 @@ SOFTWARE.
 
     },
 
+    /**
+     * @name Two.Path#_update
+     * @function
+     * @private
+     * @param {Boolean} [bubbles=false] - Force the parent to `_update` as well.
+     * @description This is called before rendering happens by the renderer. This applies all changes necessary so that rendering is up-to-date but not updated more than it needs to be.
+     * @nota-bene Try not to call this method more than once a frame.
+     */
     _update: function() {
 
       if (this._flagVertices) {
@@ -8996,6 +9339,7 @@ SOFTWARE.
 
         var l = this._collection.length;
         var last = l - 1;
+        var closed = this._closed;
 
         var beginning = Math.min(this._beginning, this._ending);
         var ending = Math.max(this._beginning, this._ending);
@@ -9048,13 +9392,13 @@ SOFTWARE.
 
             if (i === high && contains(this, ending)) {
               right = v;
-              if (right.controls) {
+              if (!closed && right.controls) {
                 right.controls.right.clear();
               }
             } else if (i === low && contains(this, beginning)) {
               left = v;
               left.command = Two.Commands.move;
-              if (left.controls) {
+              if (!closed && left.controls) {
                 left.controls.left.clear();
               }
             }
@@ -9099,12 +9443,18 @@ SOFTWARE.
 
     },
 
+    /**
+     * @name Two.Path#flagReset
+     * @function
+     * @private
+     * @description Called internally to reset all flags. Ensures that only properties that change are updated before being sent to the renderer.
+     */
     flagReset: function() {
 
       this._flagVertices =  this._flagFill =  this._flagStroke =
          this._flagLinewidth = this._flagOpacity = this._flagVisible =
          this._flagCap = this._flagJoin = this._flagMiter =
-         this._flagClassName = this._flagClip = this._flagDasharray = false;
+         this._flagClassName = this._flagClip = false;
 
       Two.Shape.prototype.flagReset.call(this);
 
@@ -9140,6 +9490,13 @@ SOFTWARE.
 
   }
 
+  /**
+   * @protected
+   * @param {Two.Path} path - The path to analyze against.
+   * @param {Number} target - The target length at which to find an anchor.
+   * @returns {Integer}
+   * @description Return the id of an anchor based on a target length.
+   */
   function getIdByLength(path, target) {
 
     var total = path._length;
@@ -9225,7 +9582,7 @@ SOFTWARE.
 
   }
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -9257,7 +9614,7 @@ SOFTWARE.
 
   Path.MakeObservable(Line.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -9270,8 +9627,8 @@ SOFTWARE.
       new Two.Anchor(),
       new Two.Anchor(),
       new Two.Anchor(),
-      new Two.Anchor(),
       new Two.Anchor()
+      // new Two.Anchor() // TODO: Figure out how to handle this for `beginning` / `ending` animations
     ], true, false, true);
 
     this.width = width;
@@ -9380,7 +9737,7 @@ SOFTWARE.
 
   Rectangle.MakeObservable(Rectangle.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -9484,8 +9841,10 @@ SOFTWARE.
 
     clone: function(parent) {
 
+      var rx = this.width / 2;
+      var ry = this.height / 2;
       var resolution = this.vertices.length;
-      var clone = new Ellipse(0, 0, this.width, this.height, resolution);
+      var clone = new Ellipse(0, 0, rx, ry, resolution);
 
       clone.translation.copy(this.translation);
       clone.rotation = this.rotation;
@@ -9507,7 +9866,7 @@ SOFTWARE.
 
   Ellipse.MakeObservable(Ellipse.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -9624,7 +9983,7 @@ SOFTWARE.
 
   Circle.MakeObservable(Circle.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -9744,7 +10103,7 @@ SOFTWARE.
 
   Polygon.MakeObservable(Polygon.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -9990,7 +10349,7 @@ SOFTWARE.
     return v % l;
   }
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -10124,7 +10483,7 @@ SOFTWARE.
 
   Star.MakeObservable(Star.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -10345,7 +10704,7 @@ SOFTWARE.
 
   RoundedRectangle.MakeObservable(RoundedRectangle.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -10353,16 +10712,19 @@ SOFTWARE.
   var getComputedMatrix = Two.Utils.getComputedMatrix;
   var _ = Two.Utils;
 
-  var canvas = getCanvas();
-  var ctx = canvas.getContext('2d');
+  // Used with getBoundingClientRect was calculated through the ctx.getTextWidth
+  // var canvas = getCanvas();
+  // var ctx = canvas.getContext('2d');
 
   /**
-   * @class
    * @name Two.Text
+   * @class
+   * @extends Two.Shape
    * @param {String} message - The String to be rendered to the scene.
    * @param {Number} [x=0] - The position in the x direction for the object.
    * @param {Number} [y=0] - The position in the y direction for the object.
    * @param {Object} [styles] - An object where styles are applied. Attribute must exist in Two.Text.Properties.
+   * @description This is a primitive class for creating drawable text that can be added to the scenegraph.
    */
   var Text = Two.Text = function(message, x, y, styles) {
 
@@ -10381,6 +10743,14 @@ SOFTWARE.
         this.translation.y = y;
     }
 
+    /**
+     * @name Two.Text#dashes
+     * @property {Number[]} - Array of numbers. Odd indices represent dash length. Even indices represent dash space.
+     * @description A list of numbers that represent the repeated dash length and dash space applied to the stroke of the text.
+     * @see {@link https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/stroke-dasharray} for more information on the SVG stroke-dasharray attribute.
+     */
+    this.dashes = [];
+
     if (!_.isObject(styles)) {
       return this;
     }
@@ -10397,18 +10767,36 @@ SOFTWARE.
 
   _.extend(Two.Text, {
 
+    /**
+     * @name Two.Text.Ratio
+     * @property {Number} - Approximate aspect ratio of a typeface's character width to height.
+     */
     Ratio: 0.6,
 
+    /**
+     * @name Two.Text.Properties
+     * @property {String[]} - A list of properties that are on every {@link Two.Text}.
+     */
     Properties: [
       'value', 'family', 'size', 'leading', 'alignment', 'linewidth', 'style',
       'className', 'weight', 'decoration', 'baseline', 'opacity', 'visible',
-      'fill', 'stroke'
+      'fill', 'stroke',
     ],
 
+    /**
+     * @name Two.Text.FlagFill
+     * @function
+     * @description Cached method to let renderers know the fill property have been updated on a {@link Two.Text}.
+     */
     FlagFill: function() {
       this._flagFill = true;
     },
 
+    /**
+     * @name Two.Text.FlagStroke
+     * @function
+     * @description Cached method to let renderers know the stroke property have been updated on a {@link Two.Text}.
+     */
     FlagStroke: function() {
       this._flagStroke = true;
     },
@@ -10493,48 +10881,228 @@ SOFTWARE.
     // Flags
     // http://en.wikipedia.org/wiki/Flag
 
+    /**
+     * @name Two.Text#_flagValue
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#value} need updating.
+     */
     _flagValue: true,
+
+    /**
+     * @name Two.Text#_flagFamily
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#family} need updating.
+     */
     _flagFamily: true,
+
+    /**
+     * @name Two.Text#_flagSize
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#size} need updating.
+     */
     _flagSize: true,
+
+    /**
+     * @name Two.Text#_flagLeading
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#leading} need updating.
+     */
     _flagLeading: true,
+
+    /**
+     * @name Two.Text#_flagAlignment
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#alignment} need updating.
+     */
     _flagAlignment: true,
+
+    /**
+     * @name Two.Text#_flagBaseline
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#baseline} need updating.
+     */
     _flagBaseline: true,
+
+    /**
+     * @name Two.Text#_flagStyle
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#style} need updating.
+     */
     _flagStyle: true,
+
+    /**
+     * @name Two.Text#_flagWeight
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#weight} need updating.
+     */
     _flagWeight: true,
+
+    /**
+     * @name Two.Text#_flagDecoration
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#decoration} need updating.
+     */
     _flagDecoration: true,
 
+    /**
+     * @name Two.Text#_flagFill
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#fill} need updating.
+     */
     _flagFill: true,
+
+    /**
+     * @name Two.Text#_flagStroke
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#stroke} need updating.
+     */
     _flagStroke: true,
+
+    /**
+     * @name Two.Text#_flagLinewidth
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#linewidth} need updating.
+     */
     _flagLinewidth: true,
+
+    /**
+     * @name Two.Text#_flagOpacity
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#opacity} need updating.
+     */
     _flagOpacity: true,
+
+    /**
+     * @name Two.Text#_flagClassName
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#className} need updating.
+     */
     _flagClassName: true,
+
+    /**
+     * @name Two.Text#_flagVisible
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#visible} need updating.
+     */
     _flagVisible: true,
 
+    /**
+     * @name Two.Text#_flagClip
+     * @private
+     * @property {Boolean} - Determines whether the {@link Two.Text#clip} need updating.
+     */
     _flagClip: false,
 
     // Underlying Properties
 
+    /**
+     * @name Two.Text#value
+     * @property {String} - The characters to be rendered to the the screen. Referred to in the documentation sometimes as the `message`.
+     */
     _value: '',
+
+    /**
+     * @name Two.Text#family
+     * @property {String} - The font family Two.js should attempt to regsiter for rendering. The default value is `'sans-serif'`. Comma separated font names can be supplied as a "stack", similar to the CSS implementation of `font-family`.
+     */
     _family: 'sans-serif',
+
+    /**
+     * @name Two.Text#size
+     * @property {Number} - The font size in Two.js point space. Defaults to `13`.
+     */
     _size: 13,
+
+    /**
+     * @name Two.Text#leading
+     * @property {Number} - The height between lines measured from base to base in Two.js point space. Defaults to `17`.
+     */
     _leading: 17,
+
+    /**
+     * @name Two.Text#alignment
+     * @property {String} - Alignment of text in relation to `Two.Text.translation`'s coordinates. Possible values include `'left'`, `'center'`, `'right'`. Defaults to `'center'`.
+     */
     _alignment: 'center',
+
+    /**
+     * @name Two.Text#baseline
+     * @property {String} - The vertical aligment of the text in relation to `Two.Text.translation`'s coordinates. Possible values include `'top'`, `'middle'`, `'bottom'`, and `'baseline'`. Defaults to `'baseline'`.
+     */
     _baseline: 'middle',
+
+    /**
+     * @name Two.Text#style
+     * @property {String} - The font's style. Possible values include '`normal`', `'italic'`. Defaults to `'normal'`.
+     */
     _style: 'normal',
+
+    /**
+     * @name Two.Text#weight
+     * @property {Number} - A number at intervals of 100 to describe the font's weight. This compatibility varies with the typeface's variant weights. Larger values are bolder. Smaller values are thinner. Defaults to `'500'`.
+     */
     _weight: 500,
+
+    /**
+     * @name Two.Text#decoration
+     * @property {String} - String to delineate whether text should be decorated with for instance an `'underline'`. Defaults to `'none'`.
+     */
     _decoration: 'none',
 
+    /**
+     * @name Two.Text#fill
+     * @property {(CssColor|Two.Gradient|Two.Texture)} - The value of what the text object should be filled in with.
+     * @see {@link https://developer.mozilla.org/en-US/docs/Web/CSS/color_value} for more information on CSS Colors.
+     */
     _fill: '#000',
+
+    /**
+     * @name Two.Text#stroke
+     * @property {(CssColor|Two.Gradient|Two.Texture)} - The value of what the text object should be filled in with.
+     * @see {@link https://developer.mozilla.org/en-US/docs/Web/CSS/color_value} for more information on CSS Colors.
+     */
     _stroke: 'transparent',
+
+    /**
+     * @name Two.Text#linewidth
+     * @property {Number} - The thickness in pixels of the stroke.
+     */
     _linewidth: 1,
+
+    /**
+     * @name Two.Text#opacity
+     * @property {Number} - The opaqueness of the text object.
+     * @nota-bene Can be used in conjunction with CSS Colors that have an alpha value.
+     */
     _opacity: 1,
+
+    /**
+     * @name Two.Text#className
+     * @property {String} - A class to be applied to the element to be compatible with CSS styling. Only available for the `Two.SvgRenderer`.
+     */
     _className: '',
+
+    /**
+     * @name Two.Text#visible
+     * @property {Boolean} - Display the text object or not.
+     * @nota-bene For {@link Two.CanvasRenderer} and {@link Two.WebGLRenderer} when set to false all updating is disabled improving performance dramatically with many objects in the scene.
+     */
     _visible: true,
 
+    /**
+     * @name Two.Text#clip
+     * @property {Two.Shape} - Object to define clipping area.
+     * @nota-bene This property is currently not working becuase of SVG spec issues found here {@link https://code.google.com/p/chromium/issues/detail?id=370951}.
+     */
     _clip: false,
 
     constructor: Two.Text,
 
+    /**
+     * @name Two.Text#remove
+     * @function
+     * @description Remove self from the scene / parent.
+     */
     remove: function() {
 
       if (!this.parent) {
@@ -10547,6 +11115,13 @@ SOFTWARE.
 
     },
 
+    /**
+     * @name Two.Text#clone
+     * @function
+     * @param {Two.Group} [parent] - The parent group or scene to add the clone to.
+     * @returns {Two.Text}
+     * @description Create a new instance of {@link Two.Text} with the same properties of the current text object.
+     */
     clone: function(parent) {
 
       var clone = new Two.Text(this.value);
@@ -10562,10 +11137,16 @@ SOFTWARE.
         parent.add(clone);
       }
 
-      return clone;
+      return clone._update();
 
     },
 
+    /**
+     * @name Two.Text#toObject
+     * @function
+     * @returns {Object}
+     * @description Return a JSON compatible plain object that represents the text object.
+     */
     toObject: function() {
 
       var result = {
@@ -10592,10 +11173,17 @@ SOFTWARE.
       return this;
     },
 
-    // /**
-    //  * A shim to not break `getBoundingClientRect` calls. TODO: Implement a
-    //  * way to calculate proper bounding boxes of `Two.Text`.
-    //  */
+    // A shim to not break `getBoundingClientRect` calls.
+    // TODO: Implement a way to calculate proper bounding
+    // boxes of `Two.Text`.
+
+    /**
+     * @name Two.Text#getBoundingClientRect
+     * @function
+     * @param {Boolean} [shallow=false] - Describes whether to calculate off local matrix or world matrix.
+     * @returns {Object} - Returns object with top, left, right, bottom, width, height attributes.
+     * @description Return an object with top, left, right, bottom, width, and height parameters of the text object.
+     */
     getBoundingClientRect: function(shallow) {
 
       var matrix, border, l, x, y, i, v;
@@ -10658,6 +11246,12 @@ SOFTWARE.
 
     },
 
+    /**
+     * @name Two.Text#flagReset
+     * @function
+     * @private
+     * @description Called internally to reset all flags. Ensures that only properties that change are updated before being sent to the renderer.
+     */
     flagReset: function() {
 
       this._flagValue = this._flagFamily = this._flagSize =
@@ -10687,7 +11281,7 @@ SOFTWARE.
     }
   }
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -10952,7 +11546,7 @@ SOFTWARE.
 
   Gradient.MakeObservable(Gradient.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -11059,7 +11653,7 @@ SOFTWARE.
 
   LinearGradient.MakeObservable(LinearGradient.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -11188,7 +11782,7 @@ SOFTWARE.
 
   RadialGradient.MakeObservable(RadialGradient.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -11257,6 +11851,14 @@ SOFTWARE.
       anchor.href = path;
       return anchor.href;
     },
+
+    loadHeadlessBuffer: new Function('texture', 'loaded', [
+      'var fs = require("fs");',
+      'var buffer = fs.readFileSync(texture.src);',
+
+      'texture.image.src = buffer;',
+      'loaded();'
+    ].join('\n')),
 
     getImage: function(src) {
 
@@ -11340,11 +11942,7 @@ SOFTWARE.
 
         if (Two.Utils.isHeadless) {
 
-          var fs = require('fs');
-          var buffer = fs.readFileSync(texture.src);
-
-          texture.image.src = buffer;
-          loaded();
+          Texture.loadHeadlessBuffer(texture, loaded);
 
         } else {
 
@@ -11572,7 +12170,7 @@ SOFTWARE.
 
   Texture.MakeObservable(Texture.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -11824,7 +12422,7 @@ SOFTWARE.
 
   Sprite.MakeObservable(Sprite.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -12140,7 +12738,7 @@ SOFTWARE.
 
   ImageSequence.MakeObservable(ImageSequence.prototype);
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 (function(Two) {
 
@@ -12458,7 +13056,7 @@ SOFTWARE.
 
       var group = new Group();
       var children = _.map(this.children, function(child) {
-        return child.clone(group);
+        return child.clone();
       });
 
       group.add(children);
@@ -12478,7 +13076,7 @@ SOFTWARE.
         parent.add(group);
       }
 
-      return group;
+      return group._update();
 
     },
 
@@ -12873,7 +13471,7 @@ SOFTWARE.
 
   }
 
-})((typeof global !== 'undefined' ? global : (this || window)).Two);
+})((typeof global !== 'undefined' ? global : (this || self || window)).Two);
 
 
 export default (this || window).Two;
